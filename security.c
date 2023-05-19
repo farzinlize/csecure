@@ -49,6 +49,22 @@ void inspect_sexp(gcry_sexp_t object){
         }
     }
 }
+
+void inspect_sexp_log(gcry_sexp_t object, FILE * stream){
+    size_t len;
+    const char *data;
+    int all_items = gcry_sexp_length(object);
+    fprintf(stream, "[INSPECT] list length -> %d\n", all_items);
+    for (int i=0;i<all_items;i++){
+        data = gcry_sexp_nth_data(object, i, &len);
+        if(len)fprintf(stream, "[ITEM] i=%d | %.*s (len=%d)\n", i, (int)len, data, (int)len);
+        else{
+            fprintf(stream, "[LIST] another list at i=%d ---\n", i);
+            inspect_sexp_log(gcry_sexp_nth(object, i), stream);
+            fprintf(stream, "---end of inner list---\n");
+        }
+    }
+}
 #endif
 
 void free_keyring(keyring * thering){
@@ -60,10 +76,11 @@ void free_keyring(keyring * thering){
 /* Create new `keyring` with personal asymetric keys 
     in case of error a brief message will be printed and function will return
     unfinished `keyring` structure with NULL attributes */
-keyring generate_rsa_keys(){
+void generate_rsa_keys(keyring * keys){
     gcry_sexp_t keyconfig, keypair;
     gcry_error_t api_err;
-    keyring result = {NULL, NULL, NULL};
+    keys->me_public_key = NULL;
+    keys->me_private_key = NULL;
     
     // * * * * * * *  generate key pairs  * * * * * * * *
     // this process generate `publickey` and `privatekey` pair by using `keconfig` 
@@ -74,23 +91,20 @@ keyring generate_rsa_keys(){
     api_err = gcry_sexp_new(&keyconfig, "(genkey (rsa (nbits 4:4096)))", 0, 1);
     if(api_err){
         printf("[KEYGEN][ERROR] cant make sexp object (err=%d)\n", gcry_err_code(api_err));
-        return result;
     }
 
     // api call generating `keypair`
     api_err = gcry_pk_genkey(&keypair, keyconfig);
     if(api_err){
         printf("[KEYGEN][ERROR] cant make key pair (err=%d)\n", gcry_err_code(api_err));
-        return result;
     }
+    
+    keys->me_public_key = gcry_sexp_find_token(keypair, "public-key", 0);
+    keys->me_private_key = gcry_sexp_find_token(keypair, "private-key", 0);
     
     // free memory (end of this section)
     gcry_sexp_release(keypair);
     gcry_sexp_release(keyconfig);
-
-    result.me_public_key = gcry_sexp_find_token(keypair, "public-key", 0);
-    result.me_private_key = gcry_sexp_find_token(keypair, "private-key", 0);
-    return result;
 }
 
 void setup_other_key(keyring * keys, gcry_sexp_t rpk){
@@ -220,6 +234,7 @@ int main(){
     gcry_cipher_hd_t cipher;
     gcry_error_t api_err;
     int err, l;
+    keyring another;
     size_t length;
 
     #ifdef TEST
@@ -228,6 +243,7 @@ int main(){
     gcry_sexp_t testy;
     keyring testkeys;
     size_t testsize, testsize2;
+    char *secret, *revealed;
     #endif
 
     // * * * * * * *  generate key pairs  * * * * * * * *
@@ -255,16 +271,27 @@ int main(){
     printf("[NAME] privatekey -> \n");inspect_sexp(privatekey);
     #endif
 
+    generate_rsa_keys(&another);
+    printf("[MODULE] another key ring is generated\n");
+
+    #ifdef INSPECT
+    printf("[NAME] another publickey -> \n");inspect_sexp(another.me_public_key);
+    printf("[NAME] another privatekey -> \n");inspect_sexp(another.me_private_key);
+    #endif
+
     #ifdef TEST
     testkeys.me_private_key = privatekey;
     testkeys.me_public_key = publickey;
     testkeys.other_public_key = publickey;
-    char * secret = encrypt_msg("hi", testkeys, &testsize);
-    printf("[test] message=hi | encrypted in next line ->\n%s\n", secret);
-    printf("[test] len=(%ld)\n", testsize);
-    printf("[test] decrypted message next line ->\n%s\n", decrypt_msg(testkeys, secret, testsize, &testsize2));
-    printf("[test] len=(%ld)\n", testsize2);
-    write_sexp_file("test.sexp", privatekey);
+    secret = encrypt_msg(testkeys, "salam", 5, &testsize);
+    printf("[test] message=salam | encrypted in next line ->\n");
+    // for(int i=0;i<testsize;i++) printf("%c", secret[i]);
+    printf("\n[test] len=(%ld)\n", testsize);
+    revealed = decrypt_msg(testkeys, secret, testsize, &testsize2);
+    printf("[test] decrypted message next line ->\n");
+    for(int i=0;i<testsize2;i++) printf("%c", revealed[i]);
+    printf("\n[test] len=(%ld)\n", testsize2);
+    // write_sexp_file("test.sexp", privatekey);
     // printf("[TEST] READ/WRITE testy -> \n");
     // testy = read_sexp_file("test.sexp");
     // dump_sexp2file("test.sexp", privatekey);
