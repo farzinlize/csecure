@@ -15,6 +15,7 @@ char * read_string(FILE * data, int size);
 char * read_str(FILE * data, int size);
 void logit(const char * message, const char * logfile);
 void put_integer(uint8_t * here, int n);
+void deploy_integer(FILE * stream, int n);
 int get_integer(uint8_t * here);
 // char * concat_malloc(char * a, char * b);
 

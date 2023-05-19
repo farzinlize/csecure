@@ -13,7 +13,7 @@ int read_integer(FILE * data){
 
 char * read_string(FILE * data, int size){
     char * result = (char *) calloc(size+1, sizeof(char));
-    fread(result, sizeof(char), size, data);
+    fread(result, sizeof(char), size, data); result[size]=0;
     return result;
 }
 
@@ -40,6 +40,12 @@ void put_integer(uint8_t * here, int n){
     here[1] = (n >> 16) & 0xFF;
     here[2] = (n >> 8 ) & 0xFF;
     here[3] =  n        & 0xFF;
+}
+
+void deploy_integer(FILE * stream, int n){
+    uint8_t * buffer = malloc(INTEGER_BYTES);
+    put_integer(buffer, n);
+    fwrite(buffer, INTEGER_BYTES, 1, stream);
 }
 
 int get_integer(uint8_t * here){
