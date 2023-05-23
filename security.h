@@ -3,7 +3,10 @@
 
 #include<gcrypt.h>
 #include<stdio.h>
+#include"utility.h"
 #include"global.h"
+
+#define CHUNK_SIZE 512
 
 typedef struct keyring{
     gcry_sexp_t me_public_key;
