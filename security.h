@@ -6,7 +6,8 @@
 #include"utility.h"
 #include"global.h"
 
-#define CHUNK_SIZE 512
+#define CHUNK_SIZE 505
+#define KEY_SIZE 512
 
 typedef struct keyring{
     gcry_sexp_t me_public_key;

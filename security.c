@@ -119,21 +119,30 @@ char * decrypt_msg(keyring keys, char * encrypted_msg, size_t enc_length, size_t
     gcry_error_t api_err;
     gcry_mpi_t mpi_encrypted;
     char * chunk, * whole;
-    size_t dec_chunk_length;
+    size_t dec_chunk_length, nscanned;
 
     write_done = 0;
     how_much_left = enc_length;
-    whole = malloc(((enc_length+CHUNK_SIZE-1) / CHUNK_SIZE)*CHUNK_SIZE + 1);
+    whole = malloc(((enc_length+KEY_SIZE-1) / KEY_SIZE)*CHUNK_SIZE + 1);
 
+    // chunk data into key size pieces
     while(how_much_left > 0){
-        if(how_much_left > CHUNK_SIZE) chunk_size = CHUNK_SIZE;
-        else                           chunk_size = how_much_left;
-        api_err = gcry_mpi_scan(&mpi_encrypted, GCRYMPI_FMT_STD, &encrypted_msg[enc_length-how_much_left], chunk_size, NULL);
-        api_err = gcry_sexp_build(&recived_data, NULL, "(enc-val (flags) (rsa (a %m)))", mpi_encrypted);
+        if(how_much_left > KEY_SIZE) chunk_size = KEY_SIZE;
+        else                         chunk_size = how_much_left;
+
+        // decryption and extract data
+        api_err = gcry_mpi_scan(&mpi_encrypted, GCRYMPI_FMT_STD, &encrypted_msg[enc_length-how_much_left], chunk_size, &nscanned);
+        api_err = gcry_sexp_build(&recived_data, NULL, "(enc-val (flags pkcs1) (rsa (a %m)))", mpi_encrypted);
         api_err = gcry_pk_decrypt(&decrypted_data, recived_data, keys.me_private_key);
         chunk = (char *) gcry_sexp_nth_data(decrypted_data, 1, &dec_chunk_length);
+
+        // write data chunks
         for(i=0;i<dec_chunk_length;i++) whole[write_done++] = chunk[i];
         how_much_left -= chunk_size;
+
+        // free middle memory
+        gcry_mpi_release(mpi_encrypted);
+        gcry_sexp_release(recived_data);gcry_sexp_release(decrypted_data);
     }
     *msg_length = write_done;
     return whole;
@@ -144,7 +153,7 @@ char * decrypt_msg(keyring keys, char * encrypted_msg, size_t enc_length, size_t
     result will be saved in `enc_length` variable */
 char * encrypt_msg(keyring keys, char * msg, size_t msg_length, size_t * enc_length){
     gcry_sexp_t secret_data, encrypted_data, inside, insider;
-    gcry_mpi_t mpi_message, mpi_encrypted;
+    gcry_mpi_t mpi_encrypted;
     gcry_error_t api_err;
     size_t enc_chunk_length;
     char * whole, * chunk;
@@ -153,15 +162,15 @@ char * encrypt_msg(keyring keys, char * msg, size_t msg_length, size_t * enc_len
     // initial values and reserve memory
     write_done = 0;
     how_much_left = msg_length;
-    whole = malloc(((msg_length+CHUNK_SIZE-1) / CHUNK_SIZE)*CHUNK_SIZE + 1);
+    whole = malloc(((msg_length+CHUNK_SIZE-1) / CHUNK_SIZE)*KEY_SIZE + 1);
 
+    // chunk the data into pieces a little smaller than KEY
     while(how_much_left > 0){
         if(how_much_left > CHUNK_SIZE) chunk_size = CHUNK_SIZE;
         else                           chunk_size = how_much_left;
 
         // encryption
-        api_err = gcry_mpi_scan(&mpi_message, GCRYMPI_FMT_STD, (const char *) &msg[msg_length-how_much_left], chunk_size, NULL);
-        api_err = gcry_sexp_build(&secret_data, NULL, "(data (flags raw) (value %m))", mpi_message);
+        api_err = gcry_sexp_build(&secret_data, NULL, "(data (flags pkcs1) (value %b))", chunk_size, &msg[msg_length-how_much_left]);
         api_err = gcry_pk_encrypt(&encrypted_data, secret_data, keys.other_public_key);
 
         // extract binary
@@ -169,14 +178,14 @@ char * encrypt_msg(keyring keys, char * msg, size_t msg_length, size_t * enc_len
         insider = gcry_sexp_nth(inside, 1);gcry_sexp_release(inside);
         mpi_encrypted = gcry_sexp_nth_mpi(insider, 1, GCRYMPI_FMT_STD);gcry_sexp_release(insider);
         api_err = gcry_mpi_aprint(GCRYMPI_FMT_STD, (unsigned char **) &chunk, &enc_chunk_length, mpi_encrypted);
-        
-        // write chunks to reserved memory
-        i=0;if(chunk[0]=='\0')i++; // ignore first zero byte
-        while(i<enc_chunk_length) whole[write_done++] = chunk[i++];
+
+        // write fixed sized chunks to reserved memory
+        for(i=0;KEY_SIZE-enc_chunk_length-i!=0;i++) whole[write_done++]='\0';
+        for(i=0;i<enc_chunk_length;i++) whole[write_done++] = chunk[i];
         how_much_left -= chunk_size;
 
         //free middle memories
-        gcry_mpi_release(mpi_encrypted); gcry_mpi_release(mpi_message);
+        gcry_mpi_release(mpi_encrypted);
         gcry_sexp_release(secret_data); gcry_sexp_release(encrypted_data);
         free(chunk);
     }
@@ -251,16 +260,28 @@ gcry_sexp_t unlock_object(char * buffer, size_t length, char * passphrase, size_
 #ifdef SECURITY_MAIN
 #ifdef TEST
 //test main
-int main(){
+int main(int argc, char ** argv){
+    int datasize = atoi(argv[1]);
+    char * enc, * dec;
     keyring k;
-    size_t r;
+    size_t r, r2;
+    int errcount= 0;
     printf("[TEST] testing phase\n");
     FILE * f = fopen("cv.pdf", "rb");
-    char * data = malloc(50000);
-    fread(data, sizeof(char), 50000, f);
+    char * data = malloc(datasize);
+    fread(data, sizeof(char), datasize, f);
     generate_rsa_keys(&k); k.other_public_key=k.me_public_key;
 
-    encrypt_msg(k, data, 50000, &r);
+    enc = encrypt_msg(k, data, datasize, &r);
+    printf("[TEST] enc size -> %ld\n", r);
+
+    dec = decrypt_msg(k, enc, r, &r2);
+    printf("[TEST] dec size -> %ld\n", r2);
+
+    FILE * errfile = fopen("error.log", "w");
+    printf("%c%c%c%c\t%c%c%c%c\n", data[0], data[1], data[2], data[3], dec[0], dec[1], dec[2], dec[3]);
+    for(int i=0;i<datasize;i++) if(dec[i] != data[i]) fprintf(errfile, "err=%d|%c!=%c|i=%d|%s|%s\n", errcount++, data[i], dec[i], i, data[i]==dec[i+1]?"true":"false", dec[i]=='\0'?"zero":"not");
+    printf("Error count = %d\n", errcount);
 }
 #else
 //module main
@@ -269,10 +290,11 @@ int main(){
 
     // ---> define variables
     char buffer[1000], *cipher_buffer;
+    char * chunk;
     const char * sample_message = "[sample message to test encryption]";
     const char * sample_passphrase = "password";
     gcry_sexp_t publickey, privatekey, keyconfig, keypair, secret_data, encrypted_data, decrypted_data, recived_data, inside, insider, unlocked_key;
-    gcry_mpi_t mpi_message, mpi_recived;
+    gcry_mpi_t mpi_message, mpi_recived, mpi_sent;
     gcry_cipher_hd_t cipher;
     gcry_error_t api_err;
     int err, l;
@@ -365,10 +387,10 @@ int main(){
     #endif
 
     // * * * * * * *  encrypt a message  * * * * * * * *
-    api_err = gcry_mpi_scan(&mpi_message, GCRYMPI_FMT_USG, sample_message, strlen(sample_message), NULL);
-    if(api_err){printf("[ERROR] cant make mpi from message (err=%u)\n", api_err);return 0;}
+    // api_err = gcry_mpi_scan(&mpi_message, GCRYMPI_FMT_USG, sample_message, strlen(sample_message), NULL);
+    // if(api_err){printf("[ERROR] cant make mpi from message (err=%u)\n", api_err);return 0;}
 
-    api_err = gcry_sexp_build(&secret_data, NULL, "(data (flags raw) (value %m))", mpi_message);
+    api_err = gcry_sexp_build(&secret_data, NULL, "(data (flags pkcs1) (value %b))", strlen(sample_message), sample_message);
     if(api_err){printf("[ERROR] cant build sexp structure (err=%u)\n", api_err);return 0;}
 
     api_err = gcry_pk_encrypt(&encrypted_data, secret_data, publickey);
@@ -386,8 +408,11 @@ int main(){
     inside  = gcry_sexp_nth(encrypted_data, 1);
     insider = gcry_sexp_nth(inside, 1);gcry_sexp_release(inside);
     mpi_recived = gcry_sexp_nth_mpi(insider, 1, GCRYMPI_FMT_STD);gcry_sexp_release(insider);
+    api_err = gcry_mpi_aprint(GCRYMPI_FMT_STD, (unsigned char **) &chunk, &length, mpi_recived);
+    printf("[MODULE] size after encryption -> %ld\n", length);
     
-    api_err = gcry_sexp_build(&recived_data, NULL, "(enc-val (flags) (rsa (a %m)))", mpi_recived);
+    api_err = gcry_mpi_scan(&mpi_sent, GCRYMPI_FMT_STD, chunk, length, NULL);
+    api_err = gcry_sexp_build(&recived_data, NULL, "(enc-val (flags pkcs1) (rsa (a %m)))", mpi_sent);
     if(api_err){
         printf("[ERROR] cant make sexp from recived data (err_code=%u)\n", gcry_err_code(api_err));
         return 0;
