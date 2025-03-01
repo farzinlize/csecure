@@ -3,13 +3,11 @@
 
 #include<gcrypt.h>
 #include<stdio.h>
-#include"utility.h"
-#include"global.h"
 
-#define CHUNK_SIZE 505
-#define KEY_SIZE 512
+#define LIBCS_CHUNK_SIZE 505
+#define LIBCS_KEY_SIZE 512
 
-typedef struct keyring{
+typedef struct{
     gcry_sexp_t me_public_key;
     gcry_sexp_t me_private_key;
     gcry_sexp_t other_public_key;
@@ -23,7 +21,7 @@ char * lock_object(gcry_sexp_t the_object, char * passphrase, size_t pp_length, 
 gcry_sexp_t unlock_object(char * buffer, size_t length, char * passphrase, size_t pp_length);
 void free_keyring(keyring * thering);
 
-#ifdef INSPECT
+#ifdef CS_INSPECT
 void inspect_sexp(gcry_sexp_t object);
 void inspect_sexp_log(gcry_sexp_t object, FILE * stream);
 #endif

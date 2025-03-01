@@ -33,12 +33,12 @@ gcry_sexp_t read_sexp_memory(char * buffer, int length){
     return result;
 }
 
-#ifdef INSPECT
+#ifdef CS_INSPECT
 void inspect_sexp(gcry_sexp_t object){
     size_t len;
     const char *data;
     int all_items = gcry_sexp_length(object);
-    printf("[INSPECT] list length -> %d\n", all_items);
+    printf("[CS_INSPECT] list length -> %d\n", all_items);
     for (int i=0;i<all_items;i++){
         data = gcry_sexp_nth_data(object, i, &len);
         if(len)printf("[ITEM] i=%d | %.*s (len=%d)\n", i, (int)len, data, (int)len);
@@ -54,7 +54,7 @@ void inspect_sexp_log(gcry_sexp_t object, FILE * stream){
     size_t len;
     const char *data;
     int all_items = gcry_sexp_length(object);
-    fprintf(stream, "[INSPECT] list length -> %d\n", all_items);
+    fprintf(stream, "[CS_INSPECT] list length -> %d\n", all_items);
     for (int i=0;i<all_items;i++){
         data = gcry_sexp_nth_data(object, i, &len);
         if(len)fprintf(stream, "[ITEM] i=%d | %.*s (len=%d)\n", i, (int)len, data, (int)len);
@@ -73,7 +73,7 @@ void free_keyring(keyring * thering){
     gcry_sexp_release(thering->other_public_key);
 }
 
-/* Create new `keyring` with personal asymetric keys 
+/* Create new `keyring` with personal asymmetric keys 
     in case of error a brief message will be printed and function will return
     unfinished `keyring` structure with NULL attributes */
 void generate_rsa_keys(keyring * keys){
@@ -83,7 +83,7 @@ void generate_rsa_keys(keyring * keys){
     keys->me_private_key = NULL;
     
     // * * * * * * *  generate key pairs  * * * * * * * *
-    // this process generate `publickey` and `privatekey` pair by using `keconfig` 
+    // this process generate `publickey` and `privatekey` pair by using `keyconfig` 
     // as configuration and `keypair` for api call (gnu library)
     // `keypair` and `keyconfig` will be erased from memory after this part
 
@@ -111,29 +111,29 @@ void setup_other_key(keyring * keys, gcry_sexp_t rpk){
     keys->other_public_key = rpk;
 }
 
-/* Decrypt a message with provided size using RSA methode 
-    the length of decrypted message will be stored at `msg_lenth` variable */
+/* Decrypt a message with provided size using RSA method
+    the length of decrypted message will be stored at `msg_length` variable */
 char * decrypt_msg(keyring keys, char * encrypted_msg, size_t enc_length, size_t * msg_length){
     int how_much_left, chunk_size, estimated_chunks, write_done, i;
-    gcry_sexp_t recived_data, decrypted_data;
+    gcry_sexp_t received_data, decrypted_data;
     gcry_error_t api_err;
     gcry_mpi_t mpi_encrypted;
     char * chunk, * whole;
-    size_t dec_chunk_length, nscanned;
+    size_t dec_chunk_length, n_scanned;
 
     write_done = 0;
     how_much_left = enc_length;
-    whole = malloc(((enc_length+KEY_SIZE-1) / KEY_SIZE)*CHUNK_SIZE + 1);
+    whole = malloc(((enc_length+LIBCS_KEY_SIZE-1) / LIBCS_KEY_SIZE)*LIBCS_CHUNK_SIZE + 1);
 
     // chunk data into key size pieces
     while(how_much_left > 0){
-        if(how_much_left > KEY_SIZE) chunk_size = KEY_SIZE;
-        else                         chunk_size = how_much_left;
+        if(how_much_left > LIBCS_KEY_SIZE) chunk_size = LIBCS_KEY_SIZE;
+        else                               chunk_size = how_much_left;
 
         // decryption and extract data
-        api_err = gcry_mpi_scan(&mpi_encrypted, GCRYMPI_FMT_STD, &encrypted_msg[enc_length-how_much_left], chunk_size, &nscanned);
-        api_err = gcry_sexp_build(&recived_data, NULL, "(enc-val (flags pkcs1) (rsa (a %m)))", mpi_encrypted);
-        api_err = gcry_pk_decrypt(&decrypted_data, recived_data, keys.me_private_key);
+        api_err = gcry_mpi_scan(&mpi_encrypted, GCRYMPI_FMT_STD, &encrypted_msg[enc_length-how_much_left], chunk_size, &n_scanned);
+        api_err = gcry_sexp_build(&received_data, NULL, "(enc-val (flags pkcs1) (rsa (a %m)))", mpi_encrypted);
+        api_err = gcry_pk_decrypt(&decrypted_data, received_data, keys.me_private_key);
         chunk = (char *) gcry_sexp_nth_data(decrypted_data, 1, &dec_chunk_length);
 
         // write data chunks
@@ -142,7 +142,7 @@ char * decrypt_msg(keyring keys, char * encrypted_msg, size_t enc_length, size_t
 
         // free middle memory
         gcry_mpi_release(mpi_encrypted);
-        gcry_sexp_release(recived_data);gcry_sexp_release(decrypted_data);
+        gcry_sexp_release(received_data);gcry_sexp_release(decrypted_data);
     }
     *msg_length = write_done;
     return whole;
@@ -162,12 +162,12 @@ char * encrypt_msg(keyring keys, char * msg, size_t msg_length, size_t * enc_len
     // initial values and reserve memory
     write_done = 0;
     how_much_left = msg_length;
-    whole = malloc(((msg_length+CHUNK_SIZE-1) / CHUNK_SIZE)*KEY_SIZE + 1);
+    whole = malloc(((msg_length+LIBCS_CHUNK_SIZE-1) / LIBCS_CHUNK_SIZE)*LIBCS_KEY_SIZE + 1);
 
     // chunk the data into pieces a little smaller than KEY
     while(how_much_left > 0){
-        if(how_much_left > CHUNK_SIZE) chunk_size = CHUNK_SIZE;
-        else                           chunk_size = how_much_left;
+        if(how_much_left > LIBCS_CHUNK_SIZE) chunk_size = LIBCS_CHUNK_SIZE;
+        else                                 chunk_size = how_much_left;
 
         // encryption
         api_err = gcry_sexp_build(&secret_data, NULL, "(data (flags pkcs1) (value %b))", chunk_size, &msg[msg_length-how_much_left]);
@@ -180,7 +180,7 @@ char * encrypt_msg(keyring keys, char * msg, size_t msg_length, size_t * enc_len
         api_err = gcry_mpi_aprint(GCRYMPI_FMT_STD, (unsigned char **) &chunk, &enc_chunk_length, mpi_encrypted);
 
         // write fixed sized chunks to reserved memory
-        for(i=0;KEY_SIZE-enc_chunk_length-i!=0;i++) whole[write_done++]='\0';
+        for(i=0;LIBCS_KEY_SIZE-enc_chunk_length-i!=0;i++) whole[write_done++]='\0';
         for(i=0;i<enc_chunk_length;i++) whole[write_done++] = chunk[i];
         how_much_left -= chunk_size;
 
@@ -194,7 +194,7 @@ char * encrypt_msg(keyring keys, char * msg, size_t msg_length, size_t * enc_len
     return whole;
 }
 
-/* Encrypt a key or `gcry_sexp_t` object using symetric cipher using a password
+/* Encrypt a key or `gcry_sexp_t` object using symmetric cipher using a password
     the shared key is a passphrase shared between peers with length of `pp_length` 
     length of the encrypted text will be placed at `length` variable
     WARNING -> `free(buffer)` you must call `free` on output of this function 
@@ -233,7 +233,7 @@ char * lock_object(gcry_sexp_t the_object, char * passphrase, size_t pp_length, 
     return data_buffer;
 }
 
-/* Decrypt a key or `gcry_sexp_t` object in `buffer` with symetric cipher using shared key
+/* Decrypt a key or `gcry_sexp_t` object in `buffer` with symmetric cipher using shared key
     the shared key is a passphrase shared between peers with length of `pp_length`
     buffer size is `length` */
 gcry_sexp_t unlock_object(char * buffer, size_t length, char * passphrase, size_t pp_length){
@@ -248,7 +248,7 @@ gcry_sexp_t unlock_object(char * buffer, size_t length, char * passphrase, size_
     gcry_md_write(hash_machine, passphrase, pp_length);
     hash_key = gcry_md_read(hash_machine, GCRY_MD_SHA256);
 
-    // decyption
+    // decryption
     api_err = gcry_cipher_open(&cipher, GCRY_CIPHER_AES256, GCRY_CIPHER_MODE_ECB, 0);
     api_err = gcry_cipher_setkey(cipher, hash_key, 32);
     api_err = gcry_cipher_decrypt(cipher, buffer, length, NULL, 0);
@@ -291,8 +291,8 @@ int main(){
     // ---> define variables
     char buffer[1000], *cipher_buffer;
     char * chunk;
-    const char * sample_message = "[sample message to test encryption]";
-    const char * sample_passphrase = "password";
+    char * sample_message = "[sample message to test encryption------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------]";
+    char * sample_passphrase = "password";
     gcry_sexp_t publickey, privatekey, keyconfig, keypair, secret_data, encrypted_data, decrypted_data, recived_data, inside, insider, unlocked_key;
     gcry_mpi_t mpi_message, mpi_recived, mpi_sent;
     gcry_cipher_hd_t cipher;
@@ -311,14 +311,14 @@ int main(){
     #endif
 
     // * * * * * * *  generate key pairs  * * * * * * * *
-    // this process generate `publickey` and `privatekey` pair by using `keconfig` 
+    // this process generate `publickey` and `privatekey` pair by using `keyconfig` 
     // as configuration and `keypair` for api call (gnu library)
     // `keypair` and `keyconfig` will be erased from memory after this part
 
     // configuring key `keyconfig`
     err = gcry_sexp_new(&keyconfig, "(genkey (rsa (nbits 4:4096)))", 0, 1);
     if(err){printf("[ERROR] cant make sexp object (err=%d)\n", err);return 0;}
-    #ifdef INSPECT
+    #ifdef CS_INSPECT
     inspect_sexp(keyconfig);
     #endif
 
@@ -330,7 +330,7 @@ int main(){
     privatekey = gcry_sexp_find_token(keypair, "private-key", 0);
     printf("[MODULE] key pairs are generated successfully\n");
 
-    #ifdef INSPECT
+    #ifdef CS_INSPECT
     printf("[NAME] publickey -> \n");inspect_sexp(publickey);
     printf("[NAME] privatekey -> \n");inspect_sexp(privatekey);
     #endif
@@ -338,7 +338,7 @@ int main(){
     generate_rsa_keys(&another);
     printf("[MODULE] another key ring is generated\n");
 
-    #ifdef INSPECT
+    #ifdef CS_INSPECT
     printf("[NAME] another publickey -> \n");inspect_sexp(another.me_public_key);
     printf("[NAME] another privatekey -> \n");inspect_sexp(another.me_private_key);
     #endif
@@ -371,7 +371,7 @@ int main(){
     unlocked_key = unlock_object(cipher_buffer, length, sample_passphrase, strlen(sample_passphrase));
     printf("[MODULE] public key is locked and then unlocked with sample passphrase\n");
 
-    #ifdef INSPECT
+    #ifdef CS_INSPECT
     printf("[NAME] publickey (after lock and unlock) -> \n");inspect_sexp(unlocked_key);
     #endif
 
@@ -397,7 +397,7 @@ int main(){
     if(api_err){printf("[ERROR] cant encrypt data.sexp (err=%u)\n", api_err);return 0;}
     printf("[MODULE] a sample message is encrypted (use inspect mode to see more detail)\n");
 
-    #ifdef INSPECT
+    #ifdef CS_INSPECT
     printf("[NAME] secret_data -> \n");inspect_sexp(secret_data);
     printf("[NAME] encrypted_data -> \n");inspect_sexp(encrypted_data);
     #endif
@@ -421,7 +421,7 @@ int main(){
     if(api_err){printf("[ERROR] cant decrypt data.sexp (err=%u)\n", api_err);return 0;}
     printf("[MODULE] encrypted message is decrypted successflly\n");
 
-    #ifdef INSPECT
+    #ifdef CS_INSPECT
     printf("[NAME] decrypted_data -> \n");inspect_sexp(decrypted_data);
     #endif
 
